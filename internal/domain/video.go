@@ -15,6 +15,7 @@ var (
 	ErrInvalidUserID          = errors.New("user ID cannot be empty")
 	ErrInvalidStateTransition = errors.New("invalid video state transition")
 	ErrVideoNotFound          = errors.New("video not found")
+	ErrProgressNotFound       = errors.New("progress not found for video")
 )
 
 const MaxVideoSizeBytes int64 = 2 * 1024 * 1024 * 1024
