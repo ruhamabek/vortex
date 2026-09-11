@@ -10,13 +10,13 @@ type VideoRepository interface {
 	Save(ctx context.Context, video *Video) error
 	FindByID(ctx context.Context, id string)(*Video, error)
     Update(ctx context.Context, video *Video) error
-	ListByUserID(ctx context.Context, userID string, limit, offset string)([]*Video, error)
+	ListByUserID(ctx context.Context, userID string, limit, offset int)([]*Video, error)
 }
 
 type ObjectStorage interface{
-	 PutObject(ctx context.Context, key string, reader io.Reader, size int64, contentType string)
+	 PutObject(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error
 	 GetObject(ctx context.Context, key string)(io.ReadCloser, error)
-	 PresignedGetURL(ctx context.Context, key string, expiry time.Time)(string, error)
+	 PresignedGetURL(ctx context.Context, key string, expiry time.Duration)(string, error)
 	 DeleteObject(ctx context.Context, key string) error
 }
 
