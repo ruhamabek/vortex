@@ -35,6 +35,10 @@ func (s *MinIOStorage) PutStorage(ctx context.Context, key string, reader io.Rea
 	return nil
 }
 
+func (s *MinIOStorage) PutObject(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error {
+	return s.PutStorage(ctx, key, reader, size, contentType)
+}
+
 func (s *MinIOStorage) GetObject(ctx context.Context, key string)(io.ReadCloser, error){
 	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
 	if err != nil {
