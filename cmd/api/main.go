@@ -25,6 +25,8 @@ import (
 	pgsvc "github.com/ruhamabek/vortex/internal/storage/postgres"
 	"github.com/ruhamabek/vortex/pkg/logger"
 	"github.com/ruhamabek/vortex/pkg/middleware"
+	goredis "github.com/redis/go-redis/v9"
+	redissvc "github.com/ruhamabek/vortex/internal/storage/redis"
 )
 
 func getEnv(key, defaultVal string) string {
@@ -50,7 +52,8 @@ func main() {
 	minioSecretKey := getEnv("MINIO_SECRET_KEY", "minioadminpassword")
 	minioBucket := getEnv("MINIO_BUCKET", "raw-videos")
 	natsURL := getEnv("NATS_URL", "nats://localhost:4222")
-
+   	redisAddr := getEnv("REDIS_ADDR", "localhost:6379")
+	
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -112,6 +115,18 @@ func main() {
 		log.Fatal("failed to initialize jetstream stream", zap.Error(err))
 	}
 	log.Info("connected to nats jetstream successfully")
+    
+	//redis setup
+	log.Info("connecting to redis...", zap.String("addr", redisAddr))
+	redisClient := goredis.NewClient(&goredis.Options{
+		Addr: redisAddr,
+	})
+	defer redisClient.Close()
+
+	if err := redisClient.Ping(ctx).Err(); err != nil {
+		log.Fatal("failed to ping redis", zap.Error(err))
+	}
+	log.Info("connected to redis successfully")
 
 	// 4. Instantiate Repositories & Services
 	videoRepo := pgsvc.NewVideoRepository(dbPool)
@@ -121,9 +136,12 @@ func main() {
 	videoService := service.NewVideoService(videoRepo, objectStorage, eventPublisher)
 	videoHandler := v1.NewVideoHandler(videoService)
 
+	progressTracker := redissvc.NewRedisProgressTracker(redisClient, 24*time.Hour)
+	wsHandler := v1.NewWSHandler(progressTracker)
+
 	// 5. Setup HTTP Mux & Observability Routes
 	mux := http.NewServeMux()
-
+  
 	// Health Check & Prometheus Metrics
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -134,9 +152,10 @@ func main() {
 
 	// Application Routes
 	videoHandler.RegisterRoutes(mux)
+    wsHandler.RegisterRoutes(mux) 
 
 	// Wrap Mux with Middleware Chain: CorrelationID -> Logging -> ServeMux
-	handlerWithMiddleware := middleware.CorrelationID(middleware.Logging(mux))
+	handlerWithMiddleware := middleware.CORS(middleware.CorrelationID(middleware.Logging(mux)))
 
 	server := &http.Server{
 		Addr:              ":" + port,

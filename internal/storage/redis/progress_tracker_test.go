@@ -83,3 +83,34 @@ func TestRedisProgressTracker_Lifecycle(t *testing.T){
 		t.Errorf("expected stage 'Completed', got '%s'", stage)
 	}
 }
+
+func TestRedisProgressTracker_PubSub(t *testing.T){
+	client := setupTestRedis(t)
+	tracker := redissvc.NewRedisProgressTracker(client, 10*time.Minute)
+	videoID := "test-pubsub-video-123"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	updateChan, stopSub, err := tracker.SubscribeProgress(ctx, videoID)
+	if err != nil {
+		t.Fatalf("failed to subscribe to progress: %v", err)
+	}
+	defer stopSub()
+
+	time.Sleep(50 * time.Millisecond)
+
+	err = tracker.SetProgress(ctx, videoID, 45, "TRANSCODING")
+	if err != nil {
+		t.Fatalf("failed to set progress: %v", err)
+	}
+
+	select {
+	case update := <-updateChan:
+		  if update.Percent != 45 || update.Stage != "TRANSCODING" {
+			     t.Errorf("expected 45%% TRANSCODING, got %d%% %s", update.Percent, update.Stage)
+		  }
+	case <-time.After(2 * time.Second):
+		  t.Fatal("timed out waiting for progress update from pub/sub channel")
+	}
+}

@@ -146,7 +146,7 @@ func main() {
 			zap.String("video_id", event.VideoID),
 			zap.Error(err),
 			)
-			_ = msg.NakWithDelay(5 * time.Second)
+			_ = msg.Term()
 			return
 		}
 	   log.Info("transcoding job completed successfully", zap.String("video_id", event.VideoID))

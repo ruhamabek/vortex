@@ -2,6 +2,7 @@ package transcoder
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -76,14 +77,12 @@ func (t *FFmpegTranscoder) TranscodeHLS(
 		return fmt.Errorf("failed to open stdout: %v", err)
 	}
 
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("failed to open stderr pipe: %w", err)
-	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start ffmpeg: %w", err)
 	}
-
 
 	doneProgress := make(chan struct{})
 	go func(){
@@ -95,8 +94,7 @@ func (t *FFmpegTranscoder) TranscodeHLS(
 	<-doneProgress
 
 	if err != nil {
-		errBytes,_ := io.ReadAll(stderr)
-		return fmt.Errorf("ffmpeg execution failed: %v, details: %s", err, string(errBytes))
+		return fmt.Errorf("ffmpeg execution failed: %v, details: %s", err, stderr.String())
 	}
 
 	if onProgress != nil {
