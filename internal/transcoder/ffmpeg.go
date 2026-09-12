@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-type ProgressCallback func(percent int)
+type ProgressCallback = func(percent int)
 
 type FFmpegTranscoder struct {
 	videoCodec string
@@ -148,6 +148,10 @@ func(f *FFmpegTranscoder) parseProgress(r io.Reader, durationSec float64, onProg
 				onProgress(100)
 			}
 		}
+	}
+
+	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
+		_ = err
 	}
 }
 func (t *FFmpegTranscoder) getVideoDuration(ctx context.Context, inputPath string) (float64, error) {
