@@ -1,0 +1,171 @@
+openapi: 3.0.3
+info:
+  title: Vortex Video Infrastructure API
+  description: Distributed cloud video transcoding and adaptive bitrate (HLS) streaming engine.
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080
+    description: Local Development Server
+
+paths:
+  /api/v1/videos/upload:
+    post:
+      summary: Upload a raw video file
+      description: Streams a video file directly into S3 storage and triggers distributed HLS transcoding via NATS JetStream.
+      parameters:
+        - in: header
+          name: X-User-ID
+          schema:
+            type: string
+          required: false
+          example: user-42
+        - in: header
+          name: X-Correlation-ID
+          schema:
+            type: string
+          required: false
+          example: c9f18a24-9b5a-4b92-9c17
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - title
+                - file
+              properties:
+                title:
+                  type: string
+                  example: Mountain Sunset Drone Shot
+                file:
+                  type: string
+                  format: binary
+                  description: The raw video binary file (up to 2GB)
+      responses:
+        '201':
+          description: Video successfully uploaded and queued for transcoding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+        '400':
+          description: Bad request (missing title, invalid file, file too large)
+        '500':
+          description: Internal server error
+
+  /api/v1/videos/{id}:
+    get:
+      summary: Get video details
+      description: Returns metadata and current status for a video.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          example: 8cfdba3c-e5d3-4e8b-8149-2db2dc8d4064
+      responses:
+        '200':
+          description: Video details found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+        '404':
+          description: Video not found
+
+  /api/v1/videos/{id}/playback:
+    get:
+      summary: Get presigned HLS playback URL
+      description: Returns an authenticated, time-limited S3 presigned URL to the master HLS playlist (.m3u8).
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+          example: 8cfdba3c-e5d3-4e8b-8149-2db2dc8d4064
+      responses:
+        '200':
+          description: Playback URL generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  playback_url:
+                    type: string
+                    example: http://localhost:9000/raw-videos/hls/user-42/video-123/master.m3u8?...
+        '400':
+          description: Video is not yet ready for playback (still transcoding or failed)
+        '404':
+          description: Video not found
+
+  /ws/videos/{id}/progress:
+    get:
+      summary: Real-time transcoding progress (WebSocket)
+      description: Bi-directional WebSocket stream that pushes live progress percentage (0% to 100%) and stage updates from Redis Pub/Sub.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        '101':
+          description: Switching Protocols to WebSocket
+
+  /healthz:
+    get:
+      summary: Health check endpoint
+      responses:
+        '200':
+          description: Server is healthy
+
+  /metrics:
+    get:
+      summary: Prometheus metrics endpoint
+      responses:
+        '200':
+          description: Prometheus metrics output
+
+components:
+  schemas:
+    Video:
+      type: object
+      properties:
+        id:
+          type: string
+          example: 8cfdba3c-e5d3-4e8b-8149-2db2dc8d4064
+        title:
+          type: string
+          example: Mountain Sunset Drone Shot
+        original_file_name:
+          type: string
+          example: my_movie.mp4
+        original_size:
+          type: integer
+          format: int64
+          example: 922536
+        user_id:
+          type: string
+          example: user-42
+        status:
+          type: string
+          enum: [PENDING, UPLOADED, TRANSCODING, COMPLETED, FAILED]
+          example: COMPLETED
+        source_url:
+          type: string
+          example: raw/user-42/video_id.mp4
+        master_playlist_url:
+          type: string
+          example: hls/user-42/video_id/master.m3u8
+        error_message:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time

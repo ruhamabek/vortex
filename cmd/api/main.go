@@ -142,6 +142,35 @@ func main() {
 	// 5. Setup HTTP Mux & Observability Routes
 	mux := http.NewServeMux()
   
+	// OpenAPI Spec & Swagger UI
+	mux.HandleFunc("GET /openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "api/openapi.yaml")
+	})
+
+	mux.HandleFunc("GET /swagger", func(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		html := `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Vortex API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = () => {
+      SwaggerUIBundle({
+        url: '/openapi.yaml',
+        dom_id: '#swagger-ui',
+      });
+    };
+  </script>
+</body>
+</html>`
+		_, _ = w.Write([]byte(html))
+	})
 	// Health Check & Prometheus Metrics
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
