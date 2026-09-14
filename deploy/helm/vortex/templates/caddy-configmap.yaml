@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vortex.fullname" . }}-caddy-config
+  labels:
+    {{- include "vortex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: caddy-gateway
+data:
+  Caddyfile: |
+    :{{ .Values.caddy.service.port }} {
+        log {
+            output stdout
+            format json
+        }
+        encode gzip zstd
+        request_body {
+            max_size {{ .Values.caddy.maxUploadSize }}
+        }
+        @grpc {
+            header Content-Type application/grpc*
+        }
+        reverse_proxy @grpc h2c://{{ include "vortex.fullname" . }}-grpc:{{ .Values.grpc.service.port }}
+        reverse_proxy {{ include "vortex.fullname" . }}-api:{{ .Values.api.service.port }}
+    }

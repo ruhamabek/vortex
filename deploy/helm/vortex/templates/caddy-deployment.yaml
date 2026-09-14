@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vortex.fullname" . }}-caddy
+  labels:
+    {{- include "vortex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: caddy-gateway
+spec:
+  replicas: {{ .Values.caddy.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "vortex.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: caddy-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "vortex.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: caddy-gateway
+    spec:
+      containers:
+        - name: caddy
+          image: "{{ .Values.caddy.image.repository }}:{{ .Values.caddy.image.tag }}"
+          imagePullPolicy: {{ .Values.caddy.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.caddy.service.port }}
+          volumeMounts:
+            - name: caddy-config-volume
+              mountPath: /etc/caddy/Caddyfile
+              subPath: Caddyfile
+          resources:
+            {{- toYaml .Values.caddy.resources | nindent 12 }}
+      volumes:
+        - name: caddy-config-volume
+          configMap:
+            name: {{ include "vortex.fullname" . }}-caddy-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vortex.fullname" . }}-caddy
+  labels:
+    {{- include "vortex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: caddy-gateway
+spec:
+  type: {{ .Values.caddy.service.type }}
+  selector:
+    app.kubernetes.io/name: {{ include "vortex.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: caddy-gateway
+  ports:
+    - name: http
+      port: {{ .Values.caddy.service.port }}
+      targetPort: {{ .Values.caddy.service.port }}
+      {{- if eq .Values.caddy.service.type "NodePort" }}
+      nodePort: {{ .Values.caddy.service.nodePort }}
+      {{- end }}

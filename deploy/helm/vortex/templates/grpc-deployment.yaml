@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "vortex.fullname" . }}-grpc
+  labels:
+    {{- include "vortex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grpc
+spec:
+  replicas: {{ .Values.grpc.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "vortex.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: grpc
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "vortex.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: grpc
+    spec:
+      containers:
+        - name: grpc
+          image: "{{ .Values.grpc.image.repository }}:{{ .Values.grpc.image.tag }}"
+          imagePullPolicy: {{ .Values.grpc.image.pullPolicy }}
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.grpc.service.port }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "vortex.fullname" . }}-config
+            - secretRef:
+                name: {{ include "vortex.fullname" . }}-secrets
+          resources:
+            {{- toYaml .Values.grpc.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "vortex.fullname" . }}-grpc
+  labels:
+    {{- include "vortex.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grpc
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "vortex.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: grpc
+  ports:
+    - name: grpc
+      port: {{ .Values.grpc.service.port }}
+      targetPort: {{ .Values.grpc.service.port }}

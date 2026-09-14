@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "vortex.fullname" . }}-config
+  labels:
+    {{- include "vortex.labels" . | nindent 4 }}
+data:
+  ENVIRONMENT: {{ .Values.config.environment | quote }}
+  PORT: {{ .Values.api.service.port | quote }}
+  GRPC_PORT: {{ .Values.grpc.service.port | quote }}
+  MINIO_ENDPOINT: {{ .Values.config.minioEndpoint | quote }}
+  MINIO_BUCKET: {{ .Values.config.minioBucket | quote }}
+  NATS_URL: {{ .Values.config.natsUrl | quote }}
+  REDIS_ADDR: {{ .Values.config.redisAddr | quote }}
+  TEMPO_ENDPOINT: {{ .Values.config.tempoEndpoint | quote }}

@@ -1,0 +1,87 @@
+# Global environment configs
+config:
+  environment: "production"
+  minioEndpoint: "host.minikube.internal:9000"
+  minioBucket: "raw-videos"
+  natsUrl: "nats://host.minikube.internal:4222"
+  redisAddr: "host.minikube.internal:6379"
+  tempoEndpoint: "host.minikube.internal:4317"
+
+secrets:
+  databaseUrl: "postgres://vortex:vortex_secret_password@host.minikube.internal:5432/vortex_db?sslmode=disable"
+  minioAccessKey: "minioadmin"
+  minioSecretKey: "minioadminpassword"
+
+# REST + WebSocket API Microservice
+api:
+  replicaCount: 2
+  image:
+    repository: vortex-api
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# High-Performance gRPC Microservice
+grpc:
+  replicaCount: 2
+  image:
+    repository: vortex-grpc
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    port: 50055
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# FFmpeg Transcoder Worker
+worker:
+  replicaCount: 2
+  image:
+    repository: vortex-worker
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+# Caddy Edge Gateway & Reverse Proxy
+caddy:
+  replicaCount: 2
+  image:
+    repository: caddy
+    tag: alpine
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    port: 80
+    nodePort: 30080
+  maxUploadSize: 500MB
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
