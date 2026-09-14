@@ -1,0 +1,69 @@
+syntax = "proto3";
+
+package video.v1;
+
+option go_package = "github.com/ruhamabek/vortex/proto/gen/video/v1;videov1";
+
+enum VideoStatus {
+  VIDEO_STATUS_UNSPECIFIED = 0;
+  VIDEO_STATUS_PENDING = 1;
+  VIDEO_STATUS_UPLOADED = 2;
+  VIDEO_STATUS_TRANSCODING = 3;
+  VIDEO_STATUS_COMPLETED = 4;
+  VIDEO_STATUS_FAILED = 5;
+}
+
+message Video {
+  string id = 1;
+  string title = 2;
+  string original_file_name = 3;
+  int64 original_size = 4;
+  string user_id = 5;
+  VideoStatus status = 6;
+  string source_url = 7;
+  string master_playlist_url = 8;
+  string error_message = 9;
+  string created_at = 10;
+  string updated_at = 11;
+}
+
+message UploadMetadata {
+  string title = 1;
+  string original_file_name = 2;
+  string user_id = 3;
+  string content_type = 4;
+  int64 file_size = 5;
+}
+
+message UploadVideoRequest {
+  oneof payload {
+    UploadMetadata metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message UploadVideoResponse {
+  Video video = 1;
+}
+
+message GetVideoRequest {
+  string video_id = 1;
+}
+
+message GetVideoResponse {
+  Video video = 1;
+}
+
+message GetPlaybackURLRequest {
+  string video_id = 1;
+}
+
+message GetPlaybackURLResponse {
+  string playback_url = 1;
+}
+
+service VideoService {
+  rpc UploadVideo(stream UploadVideoRequest) returns (UploadVideoResponse);
+  rpc GetVideo(GetVideoRequest) returns (GetVideoResponse);
+  rpc GetPlaybackURL(GetPlaybackURLRequest) returns (GetPlaybackURLResponse);
+}
