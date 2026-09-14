@@ -27,30 +27,30 @@ import (
 	pgsvc "github.com/ruhamabek/vortex/internal/storage/postgres"
 	redissvc "github.com/ruhamabek/vortex/internal/storage/redis"
 	"github.com/ruhamabek/vortex/internal/workflow"
+	"github.com/ruhamabek/vortex/pkg/config"
 	"github.com/ruhamabek/vortex/pkg/logger"
 	"github.com/ruhamabek/vortex/pkg/middleware"
 	"github.com/ruhamabek/vortex/pkg/telemetry"
 )
 
-func getEnv(key, defaultVal string) string {
-	if val, ok := os.LookupEnv(key); ok && val != "" {
-		return val
-	}
-	return defaultVal
-}
-
 func main() {
-	env := getEnv("ENVIRONMENT", "development")
-	log, err := logger.Init(env)
+ 	cfg, err := config.Load()
+	if err != nil {
+		fmt.Printf("failed to load configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 2. Initialize Structured Logger
+	log, err := logger.Init(cfg.Environment)
 	if err != nil {
 		fmt.Printf("failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
 	defer log.Sync()
-     
+
+	// 3. Initialize OpenTelemetry Tracer
 	ctx := context.Background()
-	tempoEndpoint := getEnv("TEMPO_ENDPOINT", "localhost:4317")
-	tp, err := telemetry.InitTracer(ctx, "vortex-api", tempoEndpoint)
+	tp, err := telemetry.InitTracer(ctx, "vortex-api", cfg.TempoEndpoint)
 	if err != nil {
 		log.Warn("failed to initialize tracer", zap.Error(err))
 	} else {
@@ -59,58 +59,49 @@ func main() {
 			defer cancel()
 			_ = tp.Shutdown(shutdownCtx)
 		}()
-		log.Info("opentelemetry tracer initialized", zap.String("tempo", tempoEndpoint))
+		log.Info("opentelemetry tracer initialized", zap.String("tempo", cfg.TempoEndpoint))
 	}
 
-	port := getEnv("PORT", "8080")
-	dbURL := getEnv("DATABASE_URL", "postgres://vortex:vortex_secret_password@localhost:5432/vortex_db?sslmode=disable")
-	minioEndpoint := getEnv("MINIO_ENDPOINT", "localhost:9000")
-	minioAccessKey := getEnv("MINIO_ACCESS_KEY", "minioadmin")
-	minioSecretKey := getEnv("MINIO_SECRET_KEY", "minioadminpassword")
-	minioBucket := getEnv("MINIO_BUCKET", "raw-videos")
-	natsURL := getEnv("NATS_URL", "nats://localhost:4222")
-   	redisAddr := getEnv("REDIS_ADDR", "localhost:6379")
-	
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctxTimeout, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// 1. PostgreSQL 
-	log.Info("connecting to postgres...", zap.String("url", dbURL))
-	dbPool, err := pgxpool.New(ctx, dbURL)
+	// 4. Connect to PostgreSQL
+	log.Info("connecting to postgres...", zap.String("url", cfg.DatabaseURL))
+	dbPool, err := pgxpool.New(ctxTimeout, cfg.DatabaseURL)
 	if err != nil {
 		log.Fatal("unable to connect to database", zap.Error(err))
 	}
 	defer dbPool.Close()
 
-	if err := dbPool.Ping(ctx); err != nil {
+	if err := dbPool.Ping(ctxTimeout); err != nil {
 		log.Fatal("failed to ping database", zap.Error(err))
 	}
 	log.Info("connected to postgres successfully")
 
-	// 2. MinIO 
-	log.Info("connecting to minio...", zap.String("endpoint", minioEndpoint))
-	minioClient, err := minio.New(minioEndpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(minioAccessKey, minioSecretKey, ""),
-		Secure: false,
+	// 5. Connect to MinIO Object Storage
+	log.Info("connecting to minio...", zap.String("endpoint", cfg.MinIO.Endpoint))
+	minioClient, err := minio.New(cfg.MinIO.Endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, ""),
+		Secure: cfg.MinIO.UseSSL,
 	})
 	if err != nil {
 		log.Fatal("failed to initialize minio client", zap.Error(err))
 	}
 
-	exists, err := minioClient.BucketExists(ctx, minioBucket)
+	exists, err := minioClient.BucketExists(ctxTimeout, cfg.MinIO.Bucket)
 	if err != nil {
 		log.Fatal("failed to check minio bucket", zap.Error(err))
 	}
 	if !exists {
-		if err := minioClient.MakeBucket(ctx, minioBucket, minio.MakeBucketOptions{}); err != nil {
+		if err := minioClient.MakeBucket(ctxTimeout, cfg.MinIO.Bucket, minio.MakeBucketOptions{}); err != nil {
 			log.Fatal("failed to create minio bucket", zap.Error(err))
 		}
 	}
-	log.Info("connected to minio successfully", zap.String("bucket", minioBucket))
+	log.Info("connected to minio successfully", zap.String("bucket", cfg.MinIO.Bucket))
 
-	// 3. NATS JetStream  
-	log.Info("connecting to nats...", zap.String("url", natsURL))
-	nc, err := natsgo.Connect(natsURL)
+	// 6. Connect to NATS JetStream
+	log.Info("connecting to nats...", zap.String("url", cfg.NATSURL))
+	nc, err := natsgo.Connect(cfg.NATSURL)
 	if err != nil {
 		log.Fatal("failed to connect to nats", zap.Error(err))
 	}
@@ -122,7 +113,7 @@ func main() {
 	}
 
 	// Ensure JetStream Stream "VORTEX" exists
-	_, err = js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
+	_, err = js.CreateOrUpdateStream(ctxTimeout, jetstream.StreamConfig{
 		Name:      "VORTEX",
 		Subjects:  []string{"videos.>"},
 		Storage:   jetstream.FileStorage,
@@ -132,25 +123,25 @@ func main() {
 		log.Fatal("failed to initialize jetstream stream", zap.Error(err))
 	}
 	log.Info("connected to nats jetstream successfully")
-    
-	//redis setup
-	log.Info("connecting to redis...", zap.String("addr", redisAddr))
+
+	// 7. Connect to Redis
+	log.Info("connecting to redis...", zap.String("addr", cfg.RedisAddr))
 	redisClient := goredis.NewClient(&goredis.Options{
-		Addr: redisAddr,
+		Addr: cfg.RedisAddr,
 	})
 	defer redisClient.Close()
 
-	if err := redisClient.Ping(ctx).Err(); err != nil {
+	if err := redisClient.Ping(ctxTimeout).Err(); err != nil {
 		log.Fatal("failed to ping redis", zap.Error(err))
 	}
 	log.Info("connected to redis successfully")
-    
-	// Rate Limiter: Max 5 requests per 1-minute sliding window per User/IP
+
+	// 8. Rate Limiter: Max 5 requests per 1-minute sliding window per User/IP
 	rateLimiter := middleware.NewRedisRateLimiter(redisClient, 5, 1*time.Minute)
 
-	// 4. Instantiate Repositories & Services
+	// 9. Instantiate Repositories & Application Services
 	videoRepo := pgsvc.NewVideoRepository(dbPool)
-	objectStorage := miniosvc.NewMinIOStorage(minioClient, minioBucket)
+	objectStorage := miniosvc.NewMinIOStorage(minioClient, cfg.MinIO.Bucket)
 	eventPublisher := natssvc.NewNATSEventPublisher(js)
 
 	videoService := service.NewVideoService(videoRepo, objectStorage, eventPublisher)
@@ -158,8 +149,8 @@ func main() {
 
 	progressTracker := redissvc.NewRedisProgressTracker(redisClient, 24*time.Hour)
 	wsHandler := v1.NewWSHandler(progressTracker)
-    
-	// 4b. Inngest Durable Workflow Client
+
+	// 10. Inngest Durable Workflow Client
 	inngestClient, err := inngestgo.NewClient(inngestgo.ClientOpts{
 		AppID: "vortex",
 		Dev:   new(true),
@@ -174,9 +165,9 @@ func main() {
 	}
 	log.Info("inngest workflow registered successfully")
 
-	// 5. Setup HTTP Mux & Observability Routes
+	// 11. Setup HTTP Mux & Observability Routes
 	mux := http.NewServeMux()
-  
+
 	// Inngest Endpoint
 	mux.Handle("/api/inngest", inngestClient.Serve())
 
@@ -186,7 +177,7 @@ func main() {
 	})
 
 	mux.HandleFunc("GET /swagger", func(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		html := `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -209,6 +200,7 @@ func main() {
 </html>`
 		_, _ = w.Write([]byte(html))
 	})
+
 	// Health Check & Prometheus Metrics
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -219,7 +211,7 @@ func main() {
 
 	// Application Routes
 	videoHandler.RegisterRoutes(mux)
-    wsHandler.RegisterRoutes(mux) 
+	wsHandler.RegisterRoutes(mux)
 
 	// Wrap Mux with Middleware Chain: Trace -> CorrelationID -> Logging -> RateLimiter -> ServeMux
 	handlerWithMiddleware := telemetry.HTTPTraceMiddleware("vortex-api")(
@@ -227,20 +219,20 @@ func main() {
 	)
 
 	server := &http.Server{
-		Addr:              ":" + port,
+		Addr:              ":" + cfg.Port,
 		Handler:           handlerWithMiddleware,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
-	// 6. Start HTTP Server in background goroutine
+	// 12. Start HTTP Server in background goroutine
 	serverErrors := make(chan error, 1)
 	go func() {
-		log.Info("vortex api server listening", zap.String("port", port))
+		log.Info("vortex api server listening", zap.String("port", cfg.Port))
 		serverErrors <- server.ListenAndServe()
 	}()
 
-	// 7. Graceful Shutdown listener
+	// 13. Graceful Shutdown listener
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt, syscall.SIGTERM)
 
