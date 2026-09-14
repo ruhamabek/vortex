@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vortex-config
+  namespace: vortex
+data:
+  ENVIRONMENT: "production"
+  PORT: "8080"
+  GRPC_PORT: "50055"
+  MINIO_ENDPOINT: "host.minikube.internal:9000"
+  MINIO_BUCKET: "raw-videos"
+  NATS_URL: "nats://host.minikube.internal:4222"
+  REDIS_ADDR: "host.minikube.internal:6379"
+  TEMPO_ENDPOINT: "host.minikube.internal:4317"

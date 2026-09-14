@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: caddy-config
+  namespace: vortex
+data:
+  Caddyfile: |
+    :80 {
+        # Log structured JSON to stdout for Kubernetes/Loki log collectors
+        log {
+            output stdout
+            format json
+        }
+
+        # Enable high-performance compression for JSON and HLS m3u8 playlists
+        encode gzip zstd
+
+        # Allow video uploads up to 500MB
+        request_body {
+            max_size 500MB
+        }
+
+        # Route gRPC requests to vortex-grpc using HTTP/2 cleartext (h2c)
+        @grpc {
+            header Content-Type application/grpc*
+        }
+        reverse_proxy @grpc h2c://vortex-grpc:50055
+
+        # All HTTP, WebSockets (/ws/*), and Swagger traffic to vortex-api
+        # Caddy automatically handles WebSocket Upgrade headers out of the box
+        reverse_proxy vortex-api:8080
+    }

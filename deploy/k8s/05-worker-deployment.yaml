@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vortex-worker
+  namespace: vortex
+  labels:
+    app: vortex-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vortex-worker
+  template:
+    metadata:
+      labels:
+        app: vortex-worker
+    spec:
+      containers:
+        - name: vortex-worker
+          image: vortex-worker:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: vortex-config
+            - secretRef:
+                name: vortex-secrets
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
