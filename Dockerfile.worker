@@ -1,0 +1,27 @@
+# Stage 1: Build binary
+FROM golang:alpine AS builder
+
+WORKDIR /app
+
+RUN apk add --no-cache git ca-certificates
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /bin/vortex-worker ./cmd/worker
+
+# Stage 2: Worker runtime with FFmpeg
+FROM alpine:3.20
+
+RUN apk add --no-cache ffmpeg ca-certificates tzdata \
+    && addgroup -S appgroup -g 10001 \
+    && adduser -S appuser -u 10001 -G appgroup
+
+USER 10001:10001
+WORKDIR /app
+
+COPY --from=builder /bin/vortex-worker /usr/local/bin/vortex-worker
+
+ENTRYPOINT ["/usr/local/bin/vortex-worker"]
