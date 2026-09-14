@@ -1,0 +1,11 @@
+.git
+.gitignore
+*.mp4
+*.ts
+*.m3u8
+*.jpg
+*.gif
+bin/
+tmp/
+deploy/grafana/dashboards/
+deploy/prometheus/data/

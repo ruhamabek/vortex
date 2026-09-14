@@ -18,17 +18,18 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 
+	"github.com/inngest/inngestgo"
+	goredis "github.com/redis/go-redis/v9"
 	v1 "github.com/ruhamabek/vortex/internal/api/v1"
 	natssvc "github.com/ruhamabek/vortex/internal/event/nats"
 	"github.com/ruhamabek/vortex/internal/service"
 	miniosvc "github.com/ruhamabek/vortex/internal/storage/minio"
 	pgsvc "github.com/ruhamabek/vortex/internal/storage/postgres"
+	redissvc "github.com/ruhamabek/vortex/internal/storage/redis"
+	"github.com/ruhamabek/vortex/internal/workflow"
 	"github.com/ruhamabek/vortex/pkg/logger"
 	"github.com/ruhamabek/vortex/pkg/middleware"
-	goredis "github.com/redis/go-redis/v9"
-	redissvc "github.com/ruhamabek/vortex/internal/storage/redis"
-	"github.com/inngest/inngestgo"
-	"github.com/ruhamabek/vortex/internal/workflow"
+	"github.com/ruhamabek/vortex/pkg/telemetry"
 )
 
 func getEnv(key, defaultVal string) string {
@@ -46,6 +47,20 @@ func main() {
 		os.Exit(1)
 	}
 	defer log.Sync()
+     
+	ctx := context.Background()
+	tempoEndpoint := getEnv("TEMPO_ENDPOINT", "localhost:4317")
+	tp, err := telemetry.InitTracer(ctx, "vortex-api", tempoEndpoint)
+	if err != nil {
+		log.Warn("failed to initialize tracer", zap.Error(err))
+	} else {
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = tp.Shutdown(shutdownCtx)
+		}()
+		log.Info("opentelemetry tracer initialized", zap.String("tempo", tempoEndpoint))
+	}
 
 	port := getEnv("PORT", "8080")
 	dbURL := getEnv("DATABASE_URL", "postgres://vortex:vortex_secret_password@localhost:5432/vortex_db?sslmode=disable")
@@ -144,7 +159,7 @@ func main() {
 	// 4b. Inngest Durable Workflow Client
 	inngestClient, err := inngestgo.NewClient(inngestgo.ClientOpts{
 		AppID: "vortex",
-		Dev:   inngestgo.BoolPtr(true),
+		Dev:   new(true),
 	})
 	if err != nil {
 		log.Fatal("failed to initialize inngest client", zap.Error(err))
@@ -203,8 +218,10 @@ func main() {
 	videoHandler.RegisterRoutes(mux)
     wsHandler.RegisterRoutes(mux) 
 
-	// Wrap Mux with Middleware Chain: CorrelationID -> Logging -> ServeMux
-	handlerWithMiddleware := middleware.CORS(middleware.CorrelationID(middleware.Logging(mux)))
+	// Wrap Mux with Middleware Chain: Trace -> CorrelationID -> Logging -> ServeMux
+	handlerWithMiddleware := telemetry.HTTPTraceMiddleware("vortex-api")(
+		middleware.CORS(middleware.CorrelationID(middleware.Logging(mux))),
+	)
 
 	server := &http.Server{
 		Addr:              ":" + port,

@@ -13,7 +13,7 @@ import (
 
 const (
 	testNatsURL    = "nats://localhost:4222"
-	testStreamName = "VORTEX_TEST"
+	testStreamName = "VORTEX"
 )
 
 func setupTestNATS(t *testing.T)(*nats.Conn, jetstream.JetStream){
@@ -34,7 +34,7 @@ func setupTestNATS(t *testing.T)(*nats.Conn, jetstream.JetStream){
 	_, err = js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
 		Name:      testStreamName,
 		Subjects:  []string{"videos.>"},
-		Storage:   jetstream.MemoryStorage, 
+		Storage:   jetstream.FileStorage, 
 		Retention: jetstream.InterestPolicy,
 	})
 
@@ -46,7 +46,10 @@ func setupTestNATS(t *testing.T)(*nats.Conn, jetstream.JetStream){
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cleanupCancel()
-		_=js.DeleteStream(cleanupCtx, testStreamName)
+		stream, _ := js.Stream(cleanupCtx, testStreamName)
+		if stream != nil {
+			_ = stream.Purge(cleanupCtx)
+		}
 		nc.Close()
 	})
 

@@ -24,6 +24,12 @@ import (
 	"github.com/ruhamabek/vortex/internal/worker"
 	"github.com/ruhamabek/vortex/pkg/logger"
 	"go.uber.org/zap"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
+	"github.com/ruhamabek/vortex/pkg/telemetry"
 )
 
 func getEnv(key, defaultVal string) string {
@@ -40,6 +46,20 @@ func main() {
 		os.Exit(1)
 	}
 	defer log.Sync()
+    
+	ctx := context.Background()
+	tempoEndpoint := getEnv("TEMPO_ENDPOINT", "localhost:4317")
+	tp, err := telemetry.InitTracer(ctx, "vortex-worker", tempoEndpoint)
+	if err != nil {
+		log.Warn("failed to initialize tracer in worker", zap.Error(err))
+	} else {
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			_ = tp.Shutdown(shutdownCtx)
+		}()
+		log.Info("opentelemetry tracer initialized in worker", zap.String("tempo", tempoEndpoint))
+	}
 
 	dbURL := getEnv("DATABASE_URL", "postgres://vortex:vortex_secret_password@localhost:5432/vortex_db?sslmode=disable")
 	minioEndpoint := getEnv("MINIO_ENDPOINT", "localhost:9000")
@@ -127,7 +147,7 @@ func main() {
 
 	inngestClient, err := inngestgo.NewClient(inngestgo.ClientOpts{
 		AppID: "vortex",
-		Dev:   inngestgo.BoolPtr(true), 
+		Dev:   new(true), 
 	})
 	if err != nil {
 		log.Fatal("failed to initialize inngest client in worker", zap.Error(err))
@@ -150,7 +170,25 @@ func main() {
 
 		jobCtx, jobCancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		defer jobCancel()
+        
+		// Extract Trace Context propagated from API via NATS header
+		parentCtx := otel.GetTextMapPropagator().Extract(
+			context.Background(),
+			propagation.HeaderCarrier(msg.Headers()),
+		)
 
+		tracer := telemetry.Tracer("vortex-worker")
+		spanCtx, span := tracer.Start(parentCtx, "transcoder_worker.process_video",
+			trace.WithAttributes(
+				attribute.String("video_id", event.VideoID),
+				attribute.String("user_id", event.UserID),
+			),
+		)
+		defer span.End()
+
+		jobCtx, jobCancel = context.WithTimeout(spanCtx, 30*time.Minute)
+		defer jobCancel()
+		
 		if err := transcoderWorker.ProcessVideo(jobCtx, event); err != nil {
 			log.Error("transcoding job failed",
 			zap.String("video_id", event.VideoID),

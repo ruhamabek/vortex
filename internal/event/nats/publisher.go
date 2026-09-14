@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/ruhamabek/vortex/internal/domain"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 )
 
 const (
@@ -29,10 +32,19 @@ func (p *NATSEventPublisher) PublishVideoUploaded(ctx context.Context, event dom
 		return fmt.Errorf("failed to marshal video uploaded event: %v", err)
 	}
 
-	_, err = p.js.Publish(ctx, SubjectVideoUploaded, data, jetstream.WithMsgID(event.VideoID))
-	if err != nil {
-		return fmt.Errorf("failed top publish event to subject %s: %v", SubjectVideoUploaded, err)
+	msg := &nats.Msg{
+		Subject: SubjectVideoUploaded,
+		Data:    data,
+		Header:  make(nats.Header),
 	}
 
+	msg.Header.Set("Nats-Msg-Id", event.VideoID)
+
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(msg.Header))
+
+		_, err = p.js.PublishMsg(ctx, msg)
+	if err != nil {
+		return fmt.Errorf("failed to publish event to subject %s: %w", SubjectVideoUploaded, err)
+	}
 	return nil
 }
