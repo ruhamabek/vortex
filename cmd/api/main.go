@@ -144,6 +144,9 @@ func main() {
 		log.Fatal("failed to ping redis", zap.Error(err))
 	}
 	log.Info("connected to redis successfully")
+    
+	// Rate Limiter: Max 5 requests per 1-minute sliding window per User/IP
+	rateLimiter := middleware.NewRedisRateLimiter(redisClient, 5, 1*time.Minute)
 
 	// 4. Instantiate Repositories & Services
 	videoRepo := pgsvc.NewVideoRepository(dbPool)
@@ -218,9 +221,9 @@ func main() {
 	videoHandler.RegisterRoutes(mux)
     wsHandler.RegisterRoutes(mux) 
 
-	// Wrap Mux with Middleware Chain: Trace -> CorrelationID -> Logging -> ServeMux
+	// Wrap Mux with Middleware Chain: Trace -> CorrelationID -> Logging -> RateLimiter -> ServeMux
 	handlerWithMiddleware := telemetry.HTTPTraceMiddleware("vortex-api")(
-		middleware.CORS(middleware.CorrelationID(middleware.Logging(mux))),
+		middleware.CORS(middleware.CorrelationID(middleware.Logging(rateLimiter.RateLimit(mux)))),
 	)
 
 	server := &http.Server{
