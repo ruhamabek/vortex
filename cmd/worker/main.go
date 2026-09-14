@@ -8,13 +8,14 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/inngest/inngestgo"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	natsgo "github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	goredis "github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
 	"github.com/ruhamabek/vortex/internal/domain"
 	miniosvc "github.com/ruhamabek/vortex/internal/storage/minio"
 	pgsvc "github.com/ruhamabek/vortex/internal/storage/postgres"
@@ -22,6 +23,7 @@ import (
 	"github.com/ruhamabek/vortex/internal/transcoder"
 	"github.com/ruhamabek/vortex/internal/worker"
 	"github.com/ruhamabek/vortex/pkg/logger"
+	"go.uber.org/zap"
 )
 
 func getEnv(key, defaultVal string) string {
@@ -123,6 +125,14 @@ func main() {
 	ffmpegEngine := transcoder.NewFFmpegTranscoder()
 	transcoderWorker := worker.NewTranscoderWorker(videoRepo, objectStorage, progressTracker, ffmpegEngine)
 
+	inngestClient, err := inngestgo.NewClient(inngestgo.ClientOpts{
+		AppID: "vortex",
+		Dev:   inngestgo.BoolPtr(true), 
+	})
+	if err != nil {
+		log.Fatal("failed to initialize inngest client in worker", zap.Error(err))
+	}
+
 	//7. start consuming NATS messages
 	consumeCtx, err := consumer.Consume(func(msg jetstream.Msg) {
 		var event domain.VideoUploadedEvent
@@ -151,6 +161,18 @@ func main() {
 		}
 	   log.Info("transcoding job completed successfully", zap.String("video_id", event.VideoID))
        _ = msg.Ack()
+
+	   	// Trigger Inngest Post-Processing Workflow
+		_, _ = inngestClient.Send(jobCtx, map[string]any{
+			"name": "video/transcoding.completed",
+			"data": map[string]any{
+				"video_id":            event.VideoID,
+				"user_id":             event.UserID,
+				"source_url":          event.SourceURL,
+				"master_playlist_url": fmt.Sprintf("hls/%s/%s/master.m3u8", event.UserID, event.VideoID),
+				"original_file_name":  event.OriginalFileName,
+			},
+		})
 	})
 
 	if err != nil {

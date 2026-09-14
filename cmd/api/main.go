@@ -27,6 +27,8 @@ import (
 	"github.com/ruhamabek/vortex/pkg/middleware"
 	goredis "github.com/redis/go-redis/v9"
 	redissvc "github.com/ruhamabek/vortex/internal/storage/redis"
+	"github.com/inngest/inngestgo"
+	"github.com/ruhamabek/vortex/internal/workflow"
 )
 
 func getEnv(key, defaultVal string) string {
@@ -138,10 +140,28 @@ func main() {
 
 	progressTracker := redissvc.NewRedisProgressTracker(redisClient, 24*time.Hour)
 	wsHandler := v1.NewWSHandler(progressTracker)
+    
+	// 4b. Inngest Durable Workflow Client
+	inngestClient, err := inngestgo.NewClient(inngestgo.ClientOpts{
+		AppID: "vortex",
+		Dev:   inngestgo.BoolPtr(true),
+	})
+	if err != nil {
+		log.Fatal("failed to initialize inngest client", zap.Error(err))
+	}
+
+	_, err = workflow.NewPostProcessingFunction(inngestClient, objectStorage, nil)
+	if err != nil {
+		log.Fatal("failed to register inngest workflow function", zap.Error(err))
+	}
+	log.Info("inngest workflow registered successfully")
 
 	// 5. Setup HTTP Mux & Observability Routes
 	mux := http.NewServeMux()
   
+	// Inngest Endpoint
+	mux.Handle("/api/inngest", inngestClient.Serve())
+
 	// OpenAPI Spec & Swagger UI
 	mux.HandleFunc("GET /openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, "api/openapi.yaml")
